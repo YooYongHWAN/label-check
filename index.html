@@ -104,7 +104,7 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
       <span class="t" id="shTitle">라벨을 사각형 안에 맞추세요</span>
       <span class="c" id="shCount">검사 0 · 불일치 0</span>
     </div>
-    <div id="rows"><div class="hint" id="hint">손이 멈추면 자동으로 판독합니다.</div></div>
+    <div id="rows"><div class="hint" id="hint">손이 멈추면 자동으로 판독합니다. 급하면 <b>화면을 한 번 두드리세요.</b></div></div>
   </div>
   <input type="file" id="pick" accept="image/*" capture="environment" class="hide">
 </div>
@@ -134,7 +134,7 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
       <label class="fl">기본라벨 문안 (작업의뢰서 기준)</label>
       <div class="row">
         <button class="btn ghost" id="btnSample" style="margin:0">예시 서식 넣기</button>
-        <button class="btn ghost" id="btnAuto" style="margin:0">라벨 사진에서 읽기</button>
+        <button class="btn ghost" id="btnAuto" style="margin:0">실제 라벨에서 읽기</button>
       </div>
       <textarea id="tx" placeholder="작업의뢰서의 기본라벨 칸을 한 줄씩 그대로 입력하세요."></textarea>
 
@@ -200,7 +200,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 let jobs=[],selId='',mode='admin',pin='',worker=null,ready=false,scanning=false;
-let prevSmall=null,stableSince=0,coolUntil=0,nChecked=0,nBad=0,audio=null;
+let prevSmall=null,stableSince=0,coolUntil=0,nChecked=0,nBad=0,audio=null,armed=true;
 
 const SAMPLE=`L-FENILALANINA (L-PHENYLALANINE)
 PESO NETO. :25KG
@@ -345,34 +345,47 @@ async function runRound(source){
   if(!job||!ready||scanning)return;
   scanning=true;setBanner('wait','판독 중…');
   try{
-    const texts=[];
-    if(source){texts.push(await worker.recognize(source).then(r=>r.data.text||''));}
-    else for(let k=0;k<3;k++){
-      const img=grab($('#v'),1100);if(!img)break;
-      texts.push(await worker.recognize(binarize(img)).then(r=>r.data.text||''));
-      $('#progBar').style.width=((k+1)/3*100)+'%';
-      if(k<2)await new Promise(r=>setTimeout(r,200));
-    }
-    $('#progBar').style.width='0%';
-    const good=texts.filter(t=>cmpForm(t).length>25);
-    if(!good.length){setBanner('idle','라벨이 잘 안 보입니다 — 더 가까이, 밝게');scanning=false;return;}
-
-    /* 여러 번 읽어 2회 이상 잡힌 차이만 인정 */
-    const tally=new Map();
-    for(const t of good){
-      for(const r of compare(job.text,t)){
+    const readOne=async()=>{
+      if(source)return await worker.recognize(source).then(r=>r.data.text||'');
+      const img=grab($('#v'),900);
+      if(!img)return '';
+      return await worker.recognize(binarize(img)).then(r=>r.data.text||'');
+    };
+    const collect=(list,need)=>{
+      const tally=new Map();
+      for(const t of list)for(const r of compare(job.text,t)){
         const k=rkey(r),e=tally.get(k)||{r,n:0};e.n++;tally.set(k,e);
       }
+      return [...tally.values()].filter(e=>e.n>=need).map(e=>e.r);
+    };
+
+    /* 1차: 한 번만 읽어 빠르게 판단 */
+    const texts=[await readOne()];
+    $('#progBar').style.width='45%';
+    if(cmpForm(texts[0]).length<25){
+      $('#progBar').style.width='0%';
+      setBanner('idle','라벨이 잘 안 보입니다 — 더 가까이, 밝게');
+      scanning=false;return;
     }
-    const need=good.length>=2?2:1;
-    const rows=[...tally.values()].filter(e=>e.n>=need).map(e=>e.r);
-    const hard=rows.filter(r=>r.st!=='soft').length;
+    let rows=collect(texts,1);
+    let hard=rows.filter(r=>r.st!=='soft').length;
+
+    /* 이상이 보일 때만 두 번 더 읽어 다수결 — 헛경보 방지 */
+    if(hard>0&&!source){
+      setBanner('wait','확인 중…');
+      texts.push(await readOne());$('#progBar').style.width='75%';
+      texts.push(await readOne());$('#progBar').style.width='100%';
+      rows=collect(texts.filter(t=>cmpForm(t).length>25),2);
+      hard=rows.filter(r=>r.st!=='soft').length;
+    }
+    $('#progBar').style.width='0%';
 
     nChecked++;
     if(hard)nBad++;
     render(job,rows,hard);
     beep(hard>0);
-    coolUntil=Date.now()+1600;
+    armed=false;                 /* 라벨을 치울 때까지 재판독 중지 */
+    coolUntil=Date.now()+700;
   }catch(e){setBanner('idle','판독 실패 — 다시 비춰주세요');}
   finally{scanning=false;}
 }
@@ -411,9 +424,12 @@ function loop(){
   const v=$('#v');
   if(ready&&selId&&v.videoWidth&&!scanning&&Date.now()>coolUntil){
     const d=motion(v);
-    if(d<3.2){if(!stableSince)stableSince=Date.now();
-      else if(Date.now()-stableSince>500){stableSince=0;runRound(null);}}
-    else{stableSince=0;if(d>9)setBanner('idle','다음 라벨을 비추세요');}
+    if(!armed){
+      if(d>10){armed=true;stableSince=0;setBanner('idle','다음 라벨을 비추세요');}
+    }else if(d<6){
+      if(!stableSince)stableSince=Date.now();
+      else if(Date.now()-stableSince>350){stableSince=0;runRound(null);}
+    }else stableSince=0;
   }
   requestAnimationFrame(loop);
 }
@@ -450,6 +466,13 @@ async function toCanvas(f){
   URL.revokeObjectURL(url);
   return binarize(cx.getImageData(0,0,W,H));
 }
+/* 화면을 두드리면 즉시 판독 */
+$('#v').addEventListener('click',()=>{
+  if(!ready){alert('판독 엔진이 아직 준비 중입니다.');return;}
+  if(!selId){alert('작업 건을 먼저 받아야 합니다.');return;}
+  if(scanning)return;
+  armed=true;coolUntil=0;stableSince=0;runRound(null);});
+
 $('#btnPhoto').addEventListener('click',()=>$('#pick').click());
 $('#pick').addEventListener('change',async e=>{
   const f=e.target.files[0];e.target.value='';if(!f||!ready)return;
@@ -507,6 +530,9 @@ $('#btnSample').addEventListener('click',()=>{$('#tx').value=SAMPLE;
 $('#btnSave').addEventListener('click',async()=>{
   const name=$('#jn').value.trim(),text=$('#tx').value.trim();
   if(!name||!text){alert('이름과 기준 문안을 모두 입력하세요.');return;}
+  const ln=text.split('\n').filter(l=>cmpForm(l).length>1).length;
+  if(ln>20&&!confirm(`기준 문안이 ${ln}줄입니다. 기본라벨은 보통 15줄 이내입니다.\n`+
+    `작업의뢰서 전체를 넣으신 건 아닌지 확인하세요.\n\n이대로 저장할까요?`))return;
   const id=$('#jn').dataset.id;
   if(id)Object.assign(jobs.find(x=>x.id===id),{name,text});
   else{const nid='j'+Date.now();jobs.push({id:nid,name,text});selId=nid;}
@@ -519,6 +545,8 @@ $('#btnDel').addEventListener('click',async()=>{
   await Store.set(KEY,jobs);await Store.set(SELKEY,selId);renderMgr();$('#ed').classList.add('hide');});
 $('#btnAuto').addEventListener('click',()=>{
   if(!ready){alert('판독 엔진이 아직 준비 중입니다.');return;}
+  if(!confirm('작업의뢰서 종이가 아니라 상자에 붙은 실제 라벨을 찍어야 합니다.\n'+
+    '의뢰서는 한글이 섞여 있어 판독되지 않습니다.\n\n계속할까요?'))return;
   const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.capture='environment';
   inp.onchange=async e=>{
     const f=e.target.files[0];if(!f)return;
@@ -537,14 +565,20 @@ const b64d=s=>JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g,'+').repl
 $('#btnQR').addEventListener('click',()=>{
   const j=jobs.find(x=>x.id===selId);if(!j)return;
   if(!pin){alert('먼저 반장 PIN을 정하세요.');return;}
-  const link=location.origin+location.pathname+'#j='+b64e({n:j.name,t:j.text,k:pin});
+  const tidy=j.text.split('\n').map(s=>s.trim()).filter(Boolean).join('\n');
+  const link=location.origin+location.pathname+'#j='+b64e({n:j.name,t:tidy,k:pin});
   $('#qrTitle').textContent=j.name;
   $('#qr').classList.add('on');
+  $('#qrCopy').dataset.link=link;
+  if(typeof QRCode==='undefined'){
+    alert('QR 생성기를 불러오지 못했습니다(인터넷 연결 확인).\n아래 주소 복사로 전달하세요.');return;}
+  if(link.length>2000){
+    alert('기준 문안이 너무 길어 QR에 담을 수 없습니다 ('+link.length+'자).\n'+
+          '작업의뢰서 전체가 아니라 기본라벨 칸만 남기고 줄여주세요.');return;}
   try{
     QRCode.toCanvas($('#qrCv'),link,{width:760,margin:1,errorCorrectionLevel:'L'},err=>{
-      if(err)alert('문안이 길어 QR 생성에 실패했습니다. 아래 주소 복사로 전달하세요.');});
-  }catch(e){alert('QR 생성 실패 — 주소 복사로 전달하세요.');}
-  $('#qrCopy').dataset.link=link;});
+      if(err)alert('QR 생성 실패: '+err.message+'\n아래 주소 복사로 전달하세요.');});
+  }catch(e){alert('QR 생성 실패 — 아래 주소 복사로 전달하세요.');}});
 $('#qrClose').addEventListener('click',()=>$('#qr').classList.remove('on'));
 $('#qrCopy').addEventListener('click',async e=>{
   const link=e.currentTarget.dataset.link||'';
