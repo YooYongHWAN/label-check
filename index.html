@@ -15,17 +15,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretend
 
 #scan{position:fixed;inset:0;display:flex;flex-direction:column}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-#frame{position:absolute;inset:0;pointer-events:none;border:0 solid transparent;transition:border-color .12s,border-width .12s}
+#still{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#0B0D0F;z-index:2}
+#frame{position:absolute;inset:0;pointer-events:none;border:0 solid transparent;z-index:3;transition:border-color .12s,border-width .12s}
 #frame.on{border-width:12px}
 .f-pass{border-color:var(--pass)!important}.f-fail{border-color:var(--fail)!important}.f-wait{border-color:var(--wait)!important}
-#guide{position:absolute;left:5%;right:5%;top:14%;bottom:34%;pointer-events:none}
+#guide{position:absolute;left:5%;right:5%;top:14%;bottom:34%;pointer-events:none;z-index:3}
 #guide i{position:absolute;width:26px;height:26px;border:3px solid #FFFFFFD0}
 #guide i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0}
 #guide i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0}
 #guide i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0}
 #guide i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0}
 
-#top{position:relative;z-index:5;padding:calc(9px + env(safe-area-inset-top)) 12px 9px;
+#top{position:relative;z-index:6;padding:calc(9px + env(safe-area-inset-top)) 12px 9px;
  background:linear-gradient(#000D,#0000);display:flex;align-items:center;gap:9px;color:#fff}
 #top .job{flex:1;min-width:0}
 #top .job b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -39,7 +40,10 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #banner .b small{display:block;font-size:12px;font-weight:600;opacity:.92;margin-top:3px}
 .b-pass{background:var(--pass)}.b-fail{background:var(--fail)}.b-wait{background:var(--wait)}.b-idle{background:#000B}
 
-#sheet{position:relative;z-index:5;margin-top:auto;background:var(--paper);border-top:2px solid var(--ink);max-height:48vh;display:flex;flex-direction:column}
+#tapHint{position:absolute;left:0;right:0;bottom:0;z-index:6;text-align:center;padding:10px;
+ color:#fff;font-size:12.5px;font-weight:700;background:linear-gradient(#0000,#000C);pointer-events:none}
+
+#sheet{position:relative;z-index:6;margin-top:auto;background:var(--paper);border-top:2px solid var(--ink);max-height:36vh;display:flex;flex-direction:column}
 #sheetHead{display:flex;gap:8px;align-items:center;padding:9px 13px;border-bottom:1px solid var(--rule)}
 #sheetHead .t{font-size:12px;font-weight:800;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #sheetHead .c{font-size:11px;color:var(--ink2);font-family:ui-monospace,Menlo,monospace;flex:0 0 auto}
@@ -88,6 +92,7 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
 
 <div id="scan">
   <video id="v" playsinline muted autoplay></video>
+  <canvas id="still" class="hide"></canvas>
   <div id="frame"></div>
   <div id="guide"><i></i><i></i><i></i><i></i></div>
 
@@ -98,6 +103,7 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
   </div>
   <div id="prog"><i id="progBar"></i></div>
   <div id="banner"><span class="b b-idle" id="bnr">준비 중</span></div>
+  <div id="tapHint" class="hide">화면을 두드리면 계속합니다</div>
 
   <div id="sheet">
     <div id="sheetHead">
@@ -130,21 +136,18 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
     <div id="ed" class="card hide">
       <label class="fl" for="jn">작업 건 이름</label>
       <input type="text" id="jn" placeholder="예: DSH2608-040 멕시코">
-
       <label class="fl">기본라벨 문안 (작업의뢰서 기준)</label>
       <div class="row">
         <button class="btn ghost" id="btnSample" style="margin:0">예시 서식 넣기</button>
         <button class="btn ghost" id="btnAuto" style="margin:0">실제 라벨에서 읽기</button>
       </div>
       <textarea id="tx" placeholder="작업의뢰서의 기본라벨 칸을 한 줄씩 그대로 입력하세요."></textarea>
-
       <div class="note">
         <b>아래 3개 항목은 자동으로 검사에서 빠집니다.</b> 출력할 때마다 값이 달라지는 칸이라 내용은 비교하지 않고,
-        <b>그 줄이 있는지와 값이 비어 있지 않은지</b>만 확인합니다.<br>
+        그 줄이 있는지와 값이 비어 있지 않은지만 확인합니다.<br>
         · NO. DE LOTE<br>· FECHA DE FABRICACIÓN<br>· FECHA DE CADUCIDAD<br><br>
         다른 줄도 제외하려면 그 줄 끝에 <b>*</b> 를 붙이세요.
       </div>
-
       <div class="row" style="margin-top:12px">
         <button class="btn" id="btnSave">저장</button>
         <button class="btn ghost" id="btnCancel">취소</button>
@@ -158,7 +161,7 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
         기준 문안은 <b>반장만</b> 만듭니다. 근무자는 QR을 찍어 받은 기준으로 스캔만 합니다.
         근무자 휴대폰에서 이 화면에 들어가려면 반장 PIN이 필요합니다 — 실수 방지용 잠금이지 보안 장치는 아닙니다.<br><br>
         판독은 휴대폰 안에서만 이루어집니다. 사진이 밖으로 나가지 않고 사용료도 없습니다.
-        쉼표·마침표·괄호 같은 문장부호는 판독 잡음이 많아 비교에서 제외하고, <b>글자와 숫자만</b> 대조합니다.
+        쉼표·마침표·괄호는 판독 잡음이 많아 비교에서 제외하고 <b>글자와 숫자만</b> 대조합니다.
       </div>
       <button class="btn ghost" id="btnPin">반장 PIN 변경</button>
     </div>
@@ -175,7 +178,7 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
     <div id="qrTitle"></div>
     <div class="wrap">
       <div class="note" style="text-align:left">
-        근무자는 <b>휴대폰 기본 카메라</b>로 이 QR을 비추기만 하면 됩니다. 기준 문안이 자동으로 들어갑니다.<br>
+        근무자는 <b>휴대폰 기본 카메라</b>로 이 QR을 비추기만 하면 됩니다.
         인쇄해서 작업대에 붙여두셔도 됩니다. <b>작업 건이 바뀌면 QR도 반드시 새로 바꿔 붙이세요.</b>
       </div>
       <button class="btn ghost" id="qrCopy">주소 복사 (카톡 전달용)</button>
@@ -200,7 +203,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 let jobs=[],selId='',mode='admin',pin='',worker=null,ready=false,scanning=false;
-let prevSmall=null,stableSince=0,coolUntil=0,nChecked=0,nBad=0,audio=null,armed=true;
+let prevSmall=null,stableSince=0,coolUntil=0,nChecked=0,nBad=0,audio=null,armed=true,frozen=false;
 
 const SAMPLE=`L-FENILALANINA (L-PHENYLALANINE)
 PESO NETO. :25KG
@@ -216,28 +219,17 @@ FABRICADO POR DAESANG CORPORATION GUNSAN BIO PLANT KOREA
 208, OEHANG-1 GIL, GUNSANSI, JEOLLABUK-DO, KOREA
 HECHO EN COREA`;
 
-/* ================= 문자 정규화 ================= */
+/* ================= 정규화 ================= */
 const ACC={'Á':'A','À':'A','Â':'A','Ä':'A','É':'E','È':'E','Ê':'E','Ë':'E','Í':'I','Ì':'I','Î':'I','Ï':'I',
  'Ó':'O','Ò':'O','Ô':'O','Ö':'O','Ú':'U','Ù':'U','Û':'U','Ü':'U','Ñ':'N','Ç':'C'};
 const deacc=s=>[...s].map(c=>ACC[c]||c).join('');
-/* 표시는 원문 그대로, 비교는 영숫자+공백만 */
-const cmpForm=s=>deacc(s.toUpperCase()).replace(/[|]/g,'I').replace(/[^A-Z0-9]+/g,' ').trim();
-/* 판독기가 흔히 헷갈리는 글자 (숫자 없는 줄에만 적용) */
+const cmpForm=s=>deacc(String(s||'').toUpperCase()).replace(/[|]/g,'I').replace(/[^A-Z0-9]+/g,' ').trim();
 const FOLD={'0':'O','Q':'O','1':'I','L':'I','5':'S','8':'B','2':'Z','6':'G','U':'V'};
 const foldStr=s=>[...s].map(c=>FOLD[c]||c).join('');
 const hasDigit=s=>/\d/.test(s);
-
-/* 변동 항목 판별 */
 const VARPAT=/(NO\s*DE\s*LOTE|FECHA\s*DE\s*FABRICACION|FECHA\s*DE\s*CADUCIDAD|LOT\s*NO|MFG\s*DATE|EXP\s*DATE)/;
-function isVar(line){
-  return line.trim().endsWith('*') || VARPAT.test(cmpForm(line));
-}
-/* 변동 항목의 '이름' 부분만 (콜론 앞) */
-function varKey(line){
-  const c=cmpForm(line.replace(/\*+\s*$/,''));
-  const m=c.match(VARPAT);
-  return m?m[1]:c.split(/\s{2,}/)[0];
-}
+const isVar=l=>String(l).trim().endsWith('*')||VARPAT.test(cmpForm(l));
+function varKey(l){const c=cmpForm(String(l).replace(/\*+\s*$/,''));const m=c.match(VARPAT);return m?m[1]:c;}
 
 /* ================= diff ================= */
 function lcs(a,b,eq){
@@ -262,7 +254,7 @@ function sim(a,b){
   return 2*c/(A.length+B.length);
 }
 function charMarks(a,b){
-  const ops=lcs([...a],[...b],(x,y)=>x===y);
+  const ops=lcs([...String(a)],[...String(b)],(x,y)=>x===y);
   let A='',B='';
   for(const[o,x,y]of ops){
     if(o==='='){A+=esc(x);B+=esc(y);}
@@ -271,30 +263,37 @@ function charMarks(a,b){
   }
   return[A,B];
 }
-function compare(masterText,shotText){
+/* 어느 낱말이 틀렸는지 (촬영 쪽 낱말 번호) */
+function badWordIdx(masterLine,shotLine){
+  const A=cmpForm(masterLine).split(' ').filter(Boolean);
+  const B=cmpForm(shotLine).split(' ').filter(Boolean);
+  const ops=lcs(A.map((t,i)=>({t,i})),B.map((t,i)=>({t,i})),(x,y)=>x.t===y.t);
+  const bad=[];
+  for(const[o,,y]of ops)if(o==='+'&&y)bad.push(y.i);
+  return bad;
+}
+
+/* B = [{text, bbox, words}] */
+function compare(masterText,B){
   const A=masterText.split('\n').map(s=>s.trim()).filter(s=>cmpForm(s).length>1);
-  const B=shotText.split('\n').map(s=>s.trim()).filter(s=>cmpForm(s).length>1);
-  const ops=lcs(A,B,(x,y)=>sim(x,y)>=0.6);
+  const ops=lcs(A.map(t=>({t})),B.map((o,i)=>({t:o.text,i})),(x,y)=>sim(x.t,y.t)>=0.6);
   const rows=[];
   for(const[o,x,y]of ops){
     if(o==='='){
-      if(isVar(x)){
-        const key=varKey(x),got=cmpForm(y);
-        if(!got.includes(key.replace(/\s+/g,' '))){rows.push({st:'diff',m:x,s:y,note:'항목 이름이 다릅니다'});continue;}
-        const rest=got.replace(key,'').replace(/\s/g,'');
-        if(!rest)rows.push({st:'diff',m:x,s:y,note:'값이 비어 있습니다 (LOT·일자 미인쇄)'});
+      const m=x.t,s=y.t,bi=y.i;
+      if(isVar(m)){
+        const key=varKey(m),got=cmpForm(s);
+        if(!got.includes(key)){rows.push({st:'diff',m,s,bi,note:'항목 이름이 다릅니다'});continue;}
+        if(!got.replace(key,'').replace(/\s/g,''))rows.push({st:'diff',m,s,bi,note:'값이 비어 있습니다 (LOT·일자 미인쇄)'});
         continue;
       }
-      const ca=cmpForm(x),cb=cmpForm(y);
+      const ca=cmpForm(m),cb=cmpForm(s);
       if(ca===cb)continue;
-      if(!hasDigit(ca)&&!hasDigit(cb)&&foldStr(ca)===foldStr(cb)){rows.push({st:'soft',m:x,s:y});continue;}
-      const[hm,hs]=charMarks(x,y);
-      rows.push({st:'diff',m:x,s:y,hm,hs});
-    }else if(o==='-'){
-      rows.push({st:'missing',m:x,s:''});
-    }else{
-      rows.push({st:'extra',m:'',s:y});
-    }
+      if(!hasDigit(ca)&&!hasDigit(cb)&&foldStr(ca)===foldStr(cb)){rows.push({st:'soft',m,s,bi});continue;}
+      const[hm,hs]=charMarks(m,s);
+      rows.push({st:'diff',m,s,bi,hm,hs,words:badWordIdx(m,s)});
+    }else if(o==='-'){rows.push({st:'missing',m:x.t,s:''});}
+    else{rows.push({st:'extra',m:'',s:y.t,bi:y.i,whole:true});}
   }
   return rows;
 }
@@ -302,11 +301,14 @@ const rkey=r=>r.st+'|'+cmpForm(r.m)+'|'+cmpForm(r.s);
 
 /* ================= 이미지 ================= */
 const cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true});
-function grab(video,W){
-  const vw=video.videoWidth,vh=video.videoHeight;if(!vw)return null;
+const still=$('#still'),sx2=still.getContext('2d');
+function grabROI(W){
+  const v=$('#v'),vw=v.videoWidth,vh=v.videoHeight;if(!vw)return null;
   const sx=vw*.05,sw=vw*.90,sy=vh*.14,sh=vh*.52,H=Math.round(sh*(W/sw));
-  cv.width=W;cv.height=H;cx.drawImage(video,sx,sy,sw,sh,0,0,W,H);
-  return cx.getImageData(0,0,W,H);
+  cv.width=W;cv.height=H;cx.drawImage(v,sx,sy,sw,sh,0,0,W,H);
+  const img=cx.getImageData(0,0,W,H);
+  still.width=W;still.height=H;sx2.putImageData(img,0,0);   /* 원본 색 사본 보관 */
+  return img;
 }
 function binarize(img){
   const d=img.data,N=d.length/4,g=new Uint8ClampedArray(N),hist=new Array(256).fill(0);
@@ -339,44 +341,97 @@ function beep(bad){
   try{navigator.vibrate&&navigator.vibrate(bad?[180,90,180]:40);}catch(e){}
 }
 
+/* ================= OCR (줄·낱말 위치 포함) ================= */
+async function readLines(src){
+  let res;
+  try{res=await worker.recognize(src,{},{blocks:true});}
+  catch(e){res=await worker.recognize(src);}
+  const d=res.data||{};
+  let lines=[];
+  if(Array.isArray(d.blocks)&&d.blocks.length){
+    for(const b of d.blocks)for(const p of (b.paragraphs||[]))for(const l of (p.lines||[]))lines.push(l);
+  }else if(Array.isArray(d.lines))lines=d.lines;
+  let out=lines.map(l=>({text:(l.text||'').trim(),bbox:l.bbox||null,
+    words:(l.words||[]).map(w=>({text:w.text,bbox:w.bbox}))}))
+    .filter(l=>cmpForm(l.text).length>1);
+  if(!out.length)
+    out=(d.text||'').split('\n').map(t=>({text:t.trim(),bbox:null,words:[]}))
+      .filter(l=>cmpForm(l.text).length>1);
+  return out;
+}
+
+/* ================= 화면에 직접 표시 ================= */
+function showStill(rows){
+  const W=still.width,H=still.height;
+  sx2.putImageData(sx2.getImageData(0,0,W,H),0,0);
+  const boxes=[];
+  for(const r of rows){
+    if(r.st==='soft'||r.bi==null)continue;
+    const line=lastLines[r.bi];if(!line)continue;
+    if(r.words&&r.words.length&&line.words.length){
+      for(const wi of r.words){const w=line.words[wi];if(w&&w.bbox)boxes.push(w.bbox);}
+      if(!r.words.some(wi=>line.words[wi]&&line.words[wi].bbox)&&line.bbox)boxes.push(line.bbox);
+    }else if(line.bbox)boxes.push(line.bbox);
+  }
+  const pad=Math.max(3,W*0.004);
+  sx2.lineWidth=Math.max(3,W*0.005);
+  sx2.strokeStyle='#E01E3C';sx2.fillStyle='rgba(224,30,60,0.28)';
+  for(const b of boxes){
+    const x=b.x0-pad,y=b.y0-pad,w=b.x1-b.x0+pad*2,h=b.y1-b.y0+pad*2;
+    sx2.fillRect(x,y,w,h);sx2.strokeRect(x,y,w,h);
+  }
+  still.classList.remove('hide');
+  $('#guide').classList.add('hide');
+  $('#tapHint').classList.remove('hide');
+  frozen=true;
+}
+function clearStill(){
+  still.classList.add('hide');
+  $('#guide').classList.remove('hide');
+  $('#tapHint').classList.add('hide');
+  frozen=false;
+}
+
 /* ================= 판정 ================= */
+let lastLines=[];
 async function runRound(source){
   const job=jobs.find(j=>j.id===selId);
   if(!job||!ready||scanning)return;
   scanning=true;setBanner('wait','판독 중…');
   try{
     const readOne=async()=>{
-      if(source)return await worker.recognize(source).then(r=>r.data.text||'');
-      const img=grab($('#v'),900);
-      if(!img)return '';
-      return await worker.recognize(binarize(img)).then(r=>r.data.text||'');
+      if(source)return await readLines(source);
+      const img=grabROI(900);if(!img)return [];
+      return await readLines(binarize(img));
     };
     const collect=(list,need)=>{
       const tally=new Map();
-      for(const t of list)for(const r of compare(job.text,t)){
-        const k=rkey(r),e=tally.get(k)||{r,n:0};e.n++;tally.set(k,e);
+      for(const L of list)for(const r of compare(job.text,L)){
+        const k=rkey(r),e=tally.get(k)||{r,n:0};e.n++;
+        if(r.bi!=null)e.r=r;tally.set(k,e);
       }
       return [...tally.values()].filter(e=>e.n>=need).map(e=>e.r);
     };
 
-    /* 1차: 한 번만 읽어 빠르게 판단 */
-    const texts=[await readOne()];
+    let L=await readOne();
+    lastLines=L;
     $('#progBar').style.width='45%';
-    if(cmpForm(texts[0]).length<25){
-      $('#progBar').style.width='0%';
-      setBanner('idle','라벨이 잘 안 보입니다 — 더 가까이, 밝게');
-      scanning=false;return;
-    }
-    let rows=collect(texts,1);
+    if(L.length<3){$('#progBar').style.width='0%';
+      setBanner('idle','라벨이 잘 안 보입니다 — 더 가까이, 밝게');scanning=false;return;}
+
+    let rows=collect([L],1);
     let hard=rows.filter(r=>r.st!=='soft').length;
 
-    /* 이상이 보일 때만 두 번 더 읽어 다수결 — 헛경보 방지 */
+    /* 이상이 보일 때만 두 번 더 읽어 다수결 */
     if(hard>0&&!source){
       setBanner('wait','확인 중…');
-      texts.push(await readOne());$('#progBar').style.width='75%';
-      texts.push(await readOne());$('#progBar').style.width='100%';
-      rows=collect(texts.filter(t=>cmpForm(t).length>25),2);
+      const L2=await readOne();$('#progBar').style.width='75%';
+      const L3=await readOne();$('#progBar').style.width='100%';
+      const sets=[L,L2,L3].filter(x=>x.length>=3);
+      rows=collect(sets,2);
       hard=rows.filter(r=>r.st!=='soft').length;
+      const last=sets[sets.length-1];
+      if(last)lastLines=last;
     }
     $('#progBar').style.width='0%';
 
@@ -384,11 +439,13 @@ async function runRound(source){
     if(hard)nBad++;
     render(job,rows,hard);
     beep(hard>0);
-    armed=false;                 /* 라벨을 치울 때까지 재판독 중지 */
+    if(hard)showStill(rows);
+    armed=false;
     coolUntil=Date.now()+700;
   }catch(e){setBanner('idle','판독 실패 — 다시 비춰주세요');}
   finally{scanning=false;}
 }
+
 function setBanner(kind,txt,sub){
   const b=$('#bnr');
   b.className='b b-'+(kind==='pass'?'pass':kind==='fail'?'fail':kind==='wait'?'wait':'idle');
@@ -422,11 +479,10 @@ function render(job,rows,hard){
 }
 function loop(){
   const v=$('#v');
-  if(ready&&selId&&v.videoWidth&&!scanning&&Date.now()>coolUntil){
+  if(ready&&selId&&!frozen&&v.videoWidth&&!scanning&&Date.now()>coolUntil){
     const d=motion(v);
-    if(!armed){
-      if(d>10){armed=true;stableSince=0;setBanner('idle','다음 라벨을 비추세요');}
-    }else if(d<6){
+    if(!armed){if(d>10){armed=true;stableSince=0;setBanner('idle','다음 라벨을 비추세요');}}
+    else if(d<6){
       if(!stableSince)stableSince=Date.now();
       else if(Date.now()-stableSince>350){stableSince=0;runRound(null);}
     }else stableSince=0;
@@ -464,20 +520,29 @@ async function toCanvas(f){
   const W=1500,H=Math.round(im.height*W/im.width);
   cv.width=W;cv.height=H;cx.drawImage(im,0,0,W,H);
   URL.revokeObjectURL(url);
-  return binarize(cx.getImageData(0,0,W,H));
+  const img=cx.getImageData(0,0,W,H);
+  still.width=W;still.height=H;sx2.putImageData(img,0,0);
+  return binarize(img);
 }
-/* 화면을 두드리면 즉시 판독 */
-$('#v').addEventListener('click',()=>{
+function tapScan(){
+  if(frozen){clearStill();armed=true;stableSince=0;
+    setBanner('idle','다음 라벨을 비추세요');return;}
   if(!ready){alert('판독 엔진이 아직 준비 중입니다.');return;}
   if(!selId){alert('작업 건을 먼저 받아야 합니다.');return;}
   if(scanning)return;
-  armed=true;coolUntil=0;stableSince=0;runRound(null);});
-
+  armed=true;coolUntil=0;stableSince=0;runRound(null);
+}
+$('#v').addEventListener('click',tapScan);
+still.addEventListener('click',tapScan);
 $('#btnPhoto').addEventListener('click',()=>$('#pick').click());
 $('#pick').addEventListener('change',async e=>{
   const f=e.target.files[0];e.target.value='';if(!f||!ready)return;
   if(!selId){alert('작업 건을 먼저 받아야 합니다.');return;}
-  await runRound(await toCanvas(f));coolUntil=Date.now()+2500;});
+  clearStill();
+  const c=await toCanvas(f);
+  await runRound(c);
+  /* 사진 모드도 화면에 표시 */
+  coolUntil=Date.now()+2500;});
 
 /* ================= 역할 ================= */
 async function setMode(m){mode=m;await Store.set(MODEKEY,m);
@@ -495,7 +560,7 @@ async function openMgr(){
   }
   $('#mgr').classList.add('on');renderMgr();
 }
-$('#btnMgr').addEventListener('click',openMgr);
+$('#btnMgr').addEventListener('click',e=>{e.stopPropagation();openMgr();});
 $('#btnClose').addEventListener('click',()=>{$('#mgr').classList.remove('on');
   if(ready)setBanner('idle',selId?'라벨을 비추세요':'작업 건을 받으세요');});
 $('#btnPin').addEventListener('click',async()=>{
@@ -531,8 +596,7 @@ $('#btnSave').addEventListener('click',async()=>{
   const name=$('#jn').value.trim(),text=$('#tx').value.trim();
   if(!name||!text){alert('이름과 기준 문안을 모두 입력하세요.');return;}
   const ln=text.split('\n').filter(l=>cmpForm(l).length>1).length;
-  if(ln>20&&!confirm(`기준 문안이 ${ln}줄입니다. 기본라벨은 보통 15줄 이내입니다.\n`+
-    `작업의뢰서 전체를 넣으신 건 아닌지 확인하세요.\n\n이대로 저장할까요?`))return;
+  if(ln>20&&!confirm(`기준 문안이 ${ln}줄입니다. 기본라벨은 보통 15줄 이내입니다.\n작업의뢰서 전체를 넣으신 건 아닌지 확인하세요.\n\n이대로 저장할까요?`))return;
   const id=$('#jn').dataset.id;
   if(id)Object.assign(jobs.find(x=>x.id===id),{name,text});
   else{const nid='j'+Date.now();jobs.push({id:nid,name,text});selId=nid;}
@@ -545,18 +609,17 @@ $('#btnDel').addEventListener('click',async()=>{
   await Store.set(KEY,jobs);await Store.set(SELKEY,selId);renderMgr();$('#ed').classList.add('hide');});
 $('#btnAuto').addEventListener('click',()=>{
   if(!ready){alert('판독 엔진이 아직 준비 중입니다.');return;}
-  if(!confirm('작업의뢰서 종이가 아니라 상자에 붙은 실제 라벨을 찍어야 합니다.\n'+
-    '의뢰서는 한글이 섞여 있어 판독되지 않습니다.\n\n계속할까요?'))return;
+  if(!confirm('작업의뢰서 종이가 아니라 상자에 붙은 실제 라벨을 찍어야 합니다.\n의뢰서는 한글이 섞여 있어 판독되지 않습니다.\n\n계속할까요?'))return;
   const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.capture='environment';
   inp.onchange=async e=>{
     const f=e.target.files[0];if(!f)return;
     $('#btnAuto').textContent='읽는 중…';
     try{
-      const t=await worker.recognize(await toCanvas(f)).then(r=>r.data.text||'');
-      $('#tx').value=t.split('\n').map(s=>s.trim()).filter(s=>cmpForm(s).length>1).join('\n');
+      const L=await readLines(await toCanvas(f));
+      $('#tx').value=L.map(l=>l.text).join('\n');
       alert('읽어왔습니다.\n작업의뢰서와 한 글자씩 대조해 고친 뒤 저장하세요.');
     }catch(err){alert('읽기에 실패했습니다.');}
-    finally{$('#btnAuto').textContent='라벨 사진에서 읽기';}};
+    finally{$('#btnAuto').textContent='실제 라벨에서 읽기';}};
   inp.click();});
 
 /* ================= QR ================= */
@@ -567,17 +630,11 @@ $('#btnQR').addEventListener('click',()=>{
   if(!pin){alert('먼저 반장 PIN을 정하세요.');return;}
   const tidy=j.text.split('\n').map(s=>s.trim()).filter(Boolean).join('\n');
   const link=location.origin+location.pathname+'#j='+b64e({n:j.name,t:tidy,k:pin});
-  $('#qrTitle').textContent=j.name;
-  $('#qr').classList.add('on');
-  $('#qrCopy').dataset.link=link;
-  if(typeof QRCode==='undefined'){
-    alert('QR 생성기를 불러오지 못했습니다(인터넷 연결 확인).\n아래 주소 복사로 전달하세요.');return;}
-  if(link.length>2000){
-    alert('기준 문안이 너무 길어 QR에 담을 수 없습니다 ('+link.length+'자).\n'+
-          '작업의뢰서 전체가 아니라 기본라벨 칸만 남기고 줄여주세요.');return;}
-  try{
-    QRCode.toCanvas($('#qrCv'),link,{width:760,margin:1,errorCorrectionLevel:'L'},err=>{
-      if(err)alert('QR 생성 실패: '+err.message+'\n아래 주소 복사로 전달하세요.');});
+  $('#qrTitle').textContent=j.name;$('#qr').classList.add('on');$('#qrCopy').dataset.link=link;
+  if(typeof QRCode==='undefined'){alert('QR 생성기를 불러오지 못했습니다(인터넷 확인).\n아래 주소 복사로 전달하세요.');return;}
+  if(link.length>2000){alert('기준 문안이 너무 길어 QR에 담을 수 없습니다 ('+link.length+'자).\n기본라벨 칸만 남기고 줄여주세요.');return;}
+  try{QRCode.toCanvas($('#qrCv'),link,{width:760,margin:1,errorCorrectionLevel:'L'},err=>{
+    if(err)alert('QR 생성 실패: '+err.message+'\n아래 주소 복사로 전달하세요.');});
   }catch(e){alert('QR 생성 실패 — 아래 주소 복사로 전달하세요.');}});
 $('#qrClose').addEventListener('click',()=>$('#qr').classList.remove('on'));
 $('#qrCopy').addEventListener('click',async e=>{
@@ -589,8 +646,7 @@ async function importFromHash(){
   const h=location.hash||'';
   if(h.indexOf('#j=')!==0)return false;
   try{
-    const d=b64d(h.slice(3));
-    if(!d.t)return false;
+    const d=b64d(h.slice(3));if(!d.t)return false;
     const dup=jobs.find(x=>x.name===d.n&&x.text===d.t);
     if(dup)selId=dup.id;
     else{const j={id:'j'+Date.now(),name:d.n||'전달받은 작업 건',text:d.t};jobs.push(j);selId=j.id;}
@@ -598,8 +654,7 @@ async function importFromHash(){
     await Store.set(KEY,jobs);await Store.set(SELKEY,selId);
     await setMode('worker');
     history.replaceState(null,'',location.pathname);
-    nChecked=0;nBad=0;
-    return true;
+    nChecked=0;nBad=0;return true;
   }catch(e){return false;}
 }
 
@@ -608,10 +663,8 @@ async function importFromHash(){
   jobs=await Store.get(KEY,[]);selId=await Store.get(SELKEY,'');
   mode=await Store.get(MODEKEY,'admin');pin=await Store.get(PINKEY,'');
   const got=await importFromHash();
-  await setMode(mode);
-  renderMgr();
-  await startCam();
-  await initWorker();
+  await setMode(mode);renderMgr();
+  await startCam();await initWorker();
   if(got){
     const j=jobs.find(x=>x.id===selId);
     setBanner('idle','작업 건을 받았습니다');
