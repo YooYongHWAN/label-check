@@ -19,7 +19,7 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #frame{position:absolute;inset:0;pointer-events:none;border:0 solid transparent;z-index:3;transition:border-color .12s,border-width .12s}
 #frame.on{border-width:12px}
 .f-pass{border-color:var(--pass)!important}.f-fail{border-color:var(--fail)!important}.f-wait{border-color:var(--wait)!important}
-#guide{position:absolute;left:5%;right:5%;top:14%;bottom:34%;pointer-events:none;z-index:3}
+#guide{position:absolute;left:4%;right:4%;top:12%;bottom:32%;pointer-events:none;z-index:3}
 #guide i{position:absolute;width:26px;height:26px;border:3px solid #FFFFFFD0}
 #guide i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0}
 #guide i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0}
@@ -231,7 +231,11 @@ const VARPAT=/(NO\s*DE\s*LOTE|FECHA\s*DE\s*FABRICACION|FECHA\s*DE\s*CADUCIDAD|LO
 const isVar=l=>String(l).trim().endsWith('*')||VARPAT.test(cmpForm(l));
 function varKey(l){const c=cmpForm(String(l).replace(/\*+\s*$/,''));const m=c.match(VARPAT);return m?m[1]:c;}
 
-/* ================= diff ================= */
+/* ================= diff (공백·줄바꿈 무시, 글자만 비교) ================= */
+/* 라벨 판독기는 공백을 자주 놓치고 줄도 임의로 나눕니다.
+   그래서 글자와 숫자만 뽑아 이어붙인 뒤 글자 단위로 대조합니다. */
+const K=s=>deacc(String(s||'').toUpperCase()).replace(/[|]/g,'I').replace(/[^A-Z0-9]/g,'');
+
 function lcs(a,b,eq){
   const n=a.length,m=b.length;
   const dp=Array.from({length:n+1},()=>new Int32Array(m+1));
@@ -247,12 +251,6 @@ function lcs(a,b,eq){
   while(j<m)out.push(['+',null,b[j++]]);
   return out;
 }
-function sim(a,b){
-  const A=cmpForm(a).split(' ').filter(Boolean),B=cmpForm(b).split(' ').filter(Boolean);
-  if(!A.length||!B.length)return 0;
-  const c=lcs(A,B,(x,y)=>x===y).filter(p=>p[0]==='=').length;
-  return 2*c/(A.length+B.length);
-}
 function charMarks(a,b){
   const ops=lcs([...String(a)],[...String(b)],(x,y)=>x===y);
   let A='',B='';
@@ -263,48 +261,104 @@ function charMarks(a,b){
   }
   return[A,B];
 }
-/* 어느 낱말이 틀렸는지 (촬영 쪽 낱말 번호) */
-function badWordIdx(masterLine,shotLine){
-  const A=cmpForm(masterLine).split(' ').filter(Boolean);
-  const B=cmpForm(shotLine).split(' ').filter(Boolean);
-  const ops=lcs(A.map((t,i)=>({t,i})),B.map((t,i)=>({t,i})),(x,y)=>x.t===y.t);
-  const bad=[];
-  for(const[o,,y]of ops)if(o==='+'&&y)bad.push(y.i);
-  return bad;
+
+/* 기준 문안 → 글자열 + 각 글자가 몇 번째 줄인지 */
+function buildMaster(text){
+  const lines=text.split('\n').map(s=>s.trim()).filter(s=>K(s).length>1);
+  let key='';const map=[];
+  lines.forEach((l,i)=>{const k=K(l);key+=k;for(let n=0;n<k.length;n++)map.push(i);});
+  return {lines,key,map};
+}
+/* 촬영 판독 → 글자열 + 각 글자가 몇 번째 낱말인지 (표시 위치용) */
+function buildShot(L){
+  const words=[];
+  L.forEach(l=>{
+    if(l.words&&l.words.length)l.words.forEach(w=>{if(K(w.text))words.push({text:w.text,bbox:w.bbox});});
+    else if(K(l.text))words.push({text:l.text,bbox:l.bbox});
+  });
+  let key='';const map=[];
+  words.forEach((w,i)=>{const k=K(w.text);key+=k;for(let n=0;n<k.length;n++)map.push(i);});
+  return {words,key,map};
 }
 
-/* B = [{text, bbox, words}] */
-function compare(masterText,B){
-  const A=masterText.split('\n').map(s=>s.trim()).filter(s=>cmpForm(s).length>1);
-  const ops=lcs(A.map(t=>({t})),B.map((o,i)=>({t:o.text,i})),(x,y)=>sim(x.t,y.t)>=0.6);
-  const rows=[];
+function compare(masterText,L){
+  const M=buildMaster(masterText),S=buildShot(L);
+  if(!S.key.length)return {rows:[],shot:S};
+  const A=[...M.key].map((c,i)=>({c,i})),B=[...S.key].map((c,i)=>({c,i}));
+  const ops=lcs(A,B,(x,y)=>x.c===y.c);
+
+  const lineWords=new Map();            /* 기준 줄 → 대응하는 촬영 낱말들 */
+  const lineFilled=new Map();           /* 변동 항목에 값이 찍혔는지 */
+  const groups=[];let cur=null;
+  const touch=(li,wi)=>{if(li==null||wi==null)return;
+    if(!lineWords.has(li))lineWords.set(li,new Set());lineWords.get(li).add(wi);};
+
+  let lastMi=0;                         /* 직전까지 읽은 기준 글자 위치 */
   for(const[o,x,y]of ops){
     if(o==='='){
-      const m=x.t,s=y.t,bi=y.i;
-      if(isVar(m)){
-        const key=varKey(m),got=cmpForm(s);
-        if(!got.includes(key)){rows.push({st:'diff',m,s,bi,note:'항목 이름이 다릅니다'});continue;}
-        if(!got.replace(key,'').replace(/\s/g,''))rows.push({st:'diff',m,s,bi,note:'값이 비어 있습니다 (LOT·일자 미인쇄)'});
-        continue;
+      if(cur){groups.push(cur);cur=null;}
+      lastMi=x.i;touch(M.map[x.i],S.map[y.i]);
+    }else{
+      if(!cur)cur={line:null,mc:'',sc:'',words:new Set()};
+      if(o==='-'){cur.mc+=x.c;lastMi=x.i;if(cur.line==null)cur.line=M.map[x.i];}
+      else{
+        cur.sc+=y.c;cur.words.add(S.map[y.i]);
+        if(cur.line==null)cur.line=M.map[Math.min(lastMi,M.map.length-1)];
       }
-      const ca=cmpForm(m),cb=cmpForm(s);
-      if(ca===cb)continue;
-      if(!hasDigit(ca)&&!hasDigit(cb)&&foldStr(ca)===foldStr(cb)){rows.push({st:'soft',m,s,bi});continue;}
-      const[hm,hs]=charMarks(m,s);
-      rows.push({st:'diff',m,s,bi,hm,hs,words:badWordIdx(m,s)});
-    }else if(o==='-'){rows.push({st:'missing',m:x.t,s:''});}
-    else{rows.push({st:'extra',m:'',s:y.t,bi:y.i,whole:true});}
+    }
   }
-  return rows;
+  if(cur)groups.push(cur);
+
+  /* 변동 항목(LOT·제조일·유통기한)에 값이 실제로 찍혔는지 확인 */
+  M.lines.forEach((l,i)=>{
+    if(!isVar(l))return;
+    const vk=K(l);if(!vk)return;
+    const p=S.key.indexOf(vk);
+    if(p<0){lineFilled.set(i,'없음');return;}
+    const after=S.key.slice(p+vk.length);
+    const nx=M.lines[i+1]?K(M.lines[i+1]).slice(0,8):'';
+    const cut=nx?after.indexOf(nx):-1;
+    const val=cut>=0?after.slice(0,cut):after.slice(0,24);
+    lineFilled.set(i,val.length>=3?true:false);
+  });
+
+  const rows=[],seen=new Set();
+  for(const g of groups){
+    let li=g.line;
+    if(li==null)li=M.lines.length-1;
+    const mline=M.lines[li]||'';
+    if(isVar(mline))continue;                       /* 매번 바뀌는 칸은 검사 제외 */
+    if(!g.mc&&g.sc.length<=2)continue;              /* 도장·테두리 얼룩 한두 글자는 무시 */
+    if(seen.has(li))continue;seen.add(li);
+
+    const ws=[...new Set([...(lineWords.get(li)||[]),...g.words])].sort((a,b)=>a-b);
+    const shotTxt=ws.map(i=>S.words[i]?S.words[i].text:'').join(' ').trim();
+    const st=(!hasDigit(g.mc)&&!hasDigit(g.sc)&&foldStr(g.mc)===foldStr(g.sc)&&g.mc.length)?'soft':'diff';
+    const[hm,hs]=charMarks(mline,shotTxt||'');
+    rows.push({st,line:li,m:mline,s:shotTxt,hm,hs,
+      words:ws.filter(i=>g.words.has(i)).length?[...g.words]:ws,
+      note:shotTxt?null:'이 줄을 찾지 못했습니다'});
+  }
+  /* 변동 항목에 값이 아예 없는 경우 */
+  M.lines.forEach((l,i)=>{
+    if(!isVar(l))return;
+    const f=lineFilled.get(i);
+    if(f===true)return;
+    rows.push({st:'diff',line:i,m:l,s:'',hm:esc(l),hs:'',
+      words:[...new Set(lineWords.get(i)||[])],
+      note:f==='없음'?'이 항목 자체가 라벨에 없습니다':'값이 비어 있습니다 (LOT·일자 미인쇄)'});
+  });
+  rows.sort((a,b)=>a.line-b.line);
+  return {rows,shot:S};
 }
-const rkey=r=>r.st+'|'+cmpForm(r.m)+'|'+cmpForm(r.s);
+const rkey=r=>r.st+'|'+r.line+'|'+K(r.m)+'|'+K(r.s);
 
 /* ================= 이미지 ================= */
 const cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true});
 const still=$('#still'),sx2=still.getContext('2d');
 function grabROI(W){
   const v=$('#v'),vw=v.videoWidth,vh=v.videoHeight;if(!vw)return null;
-  const sx=vw*.05,sw=vw*.90,sy=vh*.14,sh=vh*.52,H=Math.round(sh*(W/sw));
+  const sx=vw*.04,sw=vw*.92,sy=vh*.12,sh=vh*.56,H=Math.round(sh*(W/sw));
   cv.width=W;cv.height=H;cx.drawImage(v,sx,sy,sw,sh,0,0,W,H);
   const img=cx.getImageData(0,0,W,H);
   still.width=W;still.height=H;sx2.putImageData(img,0,0);   /* 원본 색 사본 보관 */
@@ -362,20 +416,18 @@ async function readLines(src){
 
 /* ================= 화면에 직접 표시 ================= */
 function showStill(rows){
-  const W=still.width,H=still.height;
-  sx2.putImageData(sx2.getImageData(0,0,W,H),0,0);
+  const W=still.width;
   const boxes=[];
   for(const r of rows){
-    if(r.st==='soft'||r.bi==null)continue;
-    const line=lastLines[r.bi];if(!line)continue;
-    if(r.words&&r.words.length&&line.words.length){
-      for(const wi of r.words){const w=line.words[wi];if(w&&w.bbox)boxes.push(w.bbox);}
-      if(!r.words.some(wi=>line.words[wi]&&line.words[wi].bbox)&&line.bbox)boxes.push(line.bbox);
-    }else if(line.bbox)boxes.push(line.bbox);
+    if(r.st==='soft')continue;
+    for(const wi of (r.words||[])){
+      const w=lastShot&&lastShot.words[wi];
+      if(w&&w.bbox)boxes.push(w.bbox);
+    }
   }
   const pad=Math.max(3,W*0.004);
   sx2.lineWidth=Math.max(3,W*0.005);
-  sx2.strokeStyle='#E01E3C';sx2.fillStyle='rgba(224,30,60,0.28)';
+  sx2.strokeStyle='#E01E3C';sx2.fillStyle='rgba(224,30,60,0.26)';
   for(const b of boxes){
     const x=b.x0-pad,y=b.y0-pad,w=b.x1-b.x0+pad*2,h=b.y1-b.y0+pad*2;
     sx2.fillRect(x,y,w,h);sx2.strokeRect(x,y,w,h);
@@ -393,7 +445,7 @@ function clearStill(){
 }
 
 /* ================= 판정 ================= */
-let lastLines=[];
+let lastShot=null;
 async function runRound(source){
   const job=jobs.find(j=>j.id===selId);
   if(!job||!ready||scanning)return;
@@ -404,34 +456,34 @@ async function runRound(source){
       const img=grabROI(900);if(!img)return [];
       return await readLines(binarize(img));
     };
-    const collect=(list,need)=>{
+    const run=L=>compare(job.text,L);
+    const collect=(results,need)=>{
       const tally=new Map();
-      for(const L of list)for(const r of compare(job.text,L)){
-        const k=rkey(r),e=tally.get(k)||{r,n:0};e.n++;
-        if(r.bi!=null)e.r=r;tally.set(k,e);
+      for(const res of results)for(const r of res.rows){
+        const k=rkey(r),e=tally.get(k)||{r,n:0};e.n++;e.r=r;tally.set(k,e);
       }
       return [...tally.values()].filter(e=>e.n>=need).map(e=>e.r);
     };
 
     let L=await readOne();
-    lastLines=L;
     $('#progBar').style.width='45%';
     if(L.length<3){$('#progBar').style.width='0%';
       setBanner('idle','라벨이 잘 안 보입니다 — 더 가까이, 밝게');scanning=false;return;}
-
-    let rows=collect([L],1);
+    let res=run(L);lastShot=res.shot;
+    let rows=res.rows;
     let hard=rows.filter(r=>r.st!=='soft').length;
 
-    /* 이상이 보일 때만 두 번 더 읽어 다수결 */
+    /* 이상이 보일 때만 두 번 더 읽어 다수결 — 헛경보 방지 */
     if(hard>0&&!source){
       setBanner('wait','확인 중…');
       const L2=await readOne();$('#progBar').style.width='75%';
       const L3=await readOne();$('#progBar').style.width='100%';
-      const sets=[L,L2,L3].filter(x=>x.length>=3);
-      rows=collect(sets,2);
-      hard=rows.filter(r=>r.st!=='soft').length;
-      const last=sets[sets.length-1];
-      if(last)lastLines=last;
+      const sets=[L,L2,L3].filter(x=>x.length>=3).map(run);
+      if(sets.length){
+        rows=collect(sets,Math.min(2,sets.length));
+        lastShot=sets[sets.length-1].shot;
+        hard=rows.filter(r=>r.st!=='soft').length;
+      }
     }
     $('#progBar').style.width='0%';
 
