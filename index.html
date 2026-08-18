@@ -82,6 +82,21 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
 .note b{color:var(--ink)}
 .hide{display:none!important}
 .badge{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.1em;padding:3px 8px;border:1px solid currentColor;color:var(--ink2)}
+#crop{position:fixed;inset:0;background:#0B0D0F;z-index:60;display:none;flex-direction:column}
+#crop.on{display:flex}
+#cropBar{display:flex;gap:8px;align-items:center;padding:calc(12px + env(safe-area-inset-top)) 12px 10px;
+ background:#111417;color:#fff}
+#cropBar .t{flex:1;font-size:12.5px;line-height:1.4;opacity:.85}
+#cropBar button{background:#FFFFFF18;color:#fff;border:1px solid #FFFFFF50;border-radius:2px;
+ font-size:13px;font-weight:700;padding:10px 13px;font-family:inherit;flex:0 0 auto}
+#cropBar button.go{background:#fff;color:#17191C;border-color:#fff}
+#cropWrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none}
+#cropStage{position:relative;touch-action:none}
+#cropCv{display:block;width:100%;height:100%}
+#cropSel{position:absolute;border:2px solid #0FA36B;background:rgba(15,163,107,.18);
+ box-shadow:0 0 0 9999px rgba(0,0,0,.5);pointer-events:none}
+#cropTip{position:absolute;left:0;right:0;bottom:0;text-align:center;color:#fff;font-size:12.5px;
+ font-weight:700;padding:12px;background:linear-gradient(#0000,#000C);pointer-events:none}
 #qrBox{text-align:center;padding:20px 16px}
 #qrBox canvas{width:min(80vw,340px)!important;height:auto!important;image-rendering:pixelated;border:10px solid #fff;background:#fff;box-shadow:0 2px 14px #0002}
 #qrTitle{font-size:19px;font-weight:800;margin:16px 0 3px}
@@ -166,6 +181,16 @@ button.btn.warn{background:#0000;color:var(--fail);border-color:var(--fail)}
       <button class="btn ghost" id="btnPin">반장 PIN 변경</button>
     </div>
   </div>
+</div>
+
+<div id="crop">
+  <div id="cropBar">
+    <button id="cropCancel">취소</button>
+    <div class="t">라벨 문안 부분만 손가락으로 드래그해 감싸세요.<br>불필요한 여백을 뺄수록 정확해집니다.</div>
+    <button class="go" id="cropGo">이 영역 읽기</button>
+  </div>
+  <div id="cropWrap"><div id="cropStage"><canvas id="cropCv"></canvas><div id="cropSel" class="hide"></div></div>
+    <div id="cropTip">드래그해서 영역 선택 · 다시 드래그하면 새로 선택됩니다</div></div>
 </div>
 
 <div id="qr">
@@ -453,7 +478,7 @@ async function runRound(source){
   try{
     const readOne=async()=>{
       if(source)return await readLines(source);
-      const img=grabROI(900);if(!img)return [];
+      const img=grabROI(760);if(!img)return [];
       return await readLines(binarize(img));
     };
     const run=L=>compare(job.text,L);
@@ -473,15 +498,14 @@ async function runRound(source){
     let rows=res.rows;
     let hard=rows.filter(r=>r.st!=='soft').length;
 
-    /* 이상이 보일 때만 두 번 더 읽어 다수결 — 헛경보 방지 */
+    /* 이상이 보일 때만 한 번 더 읽어 재확인 — 두 번 다 잡힌 차이만 인정 */
     if(hard>0&&!source){
       setBanner('wait','확인 중…');
-      const L2=await readOne();$('#progBar').style.width='75%';
-      const L3=await readOne();$('#progBar').style.width='100%';
-      const sets=[L,L2,L3].filter(x=>x.length>=3).map(run);
-      if(sets.length){
-        rows=collect(sets,Math.min(2,sets.length));
-        lastShot=sets[sets.length-1].shot;
+      const L2=await readOne();$('#progBar').style.width='90%';
+      if(L2.length>=3){
+        const sets=[run(L),run(L2)];
+        rows=collect(sets,2);
+        lastShot=sets[1].shot;
         hard=rows.filter(r=>r.st!=='soft').length;
       }
     }
@@ -558,10 +582,9 @@ async function initWorker(){
   setBanner('idle','판독 엔진 준비 중');
   const log=m=>{if(m.status&&/load|download/i.test(m.status))
     setBanner('idle','엔진 내려받는 중 '+Math.round((m.progress||0)*100)+'%');};
-  try{worker=await Tesseract.createWorker('spa+eng',1,{logger:log});}
-  catch(e){worker=await Tesseract.createWorker('eng',1,{logger:log});}
+  worker=await Tesseract.createWorker('eng',1,{logger:log});
   await worker.setParameters({
-    tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÜÑ0123456789.:,-&()/',
+    tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.:,-&()/',
     tessedit_pageseg_mode:'6',preserve_interword_spaces:'1'});
   ready=true;
   setBanner('idle',selId?'라벨을 비추세요':'작업 건을 받으세요');
@@ -659,19 +682,75 @@ $('#btnDel').addEventListener('click',async()=>{
   if(!confirm('이 작업 건을 삭제할까요?'))return;
   jobs=jobs.filter(j=>j.id!==id);if(selId===id)selId=jobs.length?jobs[0].id:'';
   await Store.set(KEY,jobs);await Store.set(SELKEY,selId);renderMgr();$('#ed').classList.add('hide');});
+/* ================= 기준 만들기: 사진 → 영역 자르기 → 판독 ================= */
+let cropSrc=null,cropScale=1,cropRect=null,cropDrag=null;
+const cropCv=$('#cropCv'),cropCtx=cropCv.getContext('2d');
+
+function openCrop(file){
+  const url=URL.createObjectURL(file),im=new Image();
+  im.onload=()=>{
+    URL.revokeObjectURL(url);cropSrc=im;cropRect=null;
+    $('#cropSel').classList.add('hide');$('#cropTip').classList.remove('hide');
+    $('#crop').classList.add('on');
+    requestAnimationFrame(()=>{
+      const wrap=$('#cropWrap').getBoundingClientRect();
+      cropScale=Math.min(wrap.width/im.width,wrap.height/im.height);
+      const w=Math.round(im.width*cropScale),h=Math.round(im.height*cropScale);
+      const st=$('#cropStage');st.style.width=w+'px';st.style.height=h+'px';
+      cropCv.width=w;cropCv.height=h;cropCtx.drawImage(im,0,0,w,h);
+    });
+  };
+  im.onerror=()=>alert('사진을 열 수 없습니다.');
+  im.src=url;
+}
+function drawSel(){
+  const d=$('#cropSel');
+  if(!cropRect){d.classList.add('hide');return;}
+  const{x,y,w,h}=cropRect;
+  d.style.left=x+'px';d.style.top=y+'px';d.style.width=w+'px';d.style.height=h+'px';
+  d.classList.remove('hide');$('#cropTip').classList.add('hide');
+}
+const stagePt=e=>{const r=$('#cropStage').getBoundingClientRect();
+  return{x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top))};};
+$('#cropStage').addEventListener('pointerdown',e=>{
+  e.preventDefault();cropDrag=stagePt(e);cropRect=null;drawSel();
+  $('#cropStage').setPointerCapture&&$('#cropStage').setPointerCapture(e.pointerId);});
+$('#cropStage').addEventListener('pointermove',e=>{
+  if(!cropDrag)return;e.preventDefault();
+  const p=stagePt(e);
+  cropRect={x:Math.min(cropDrag.x,p.x),y:Math.min(cropDrag.y,p.y),
+            w:Math.abs(p.x-cropDrag.x),h:Math.abs(p.y-cropDrag.y)};
+  drawSel();});
+$('#cropStage').addEventListener('pointerup',()=>{cropDrag=null;
+  if(cropRect&&(cropRect.w<20||cropRect.h<20)){cropRect=null;drawSel();}});
+$('#cropCancel').addEventListener('click',()=>{$('#crop').classList.remove('on');cropSrc=null;});
+
+$('#cropGo').addEventListener('click',async()=>{
+  if(!cropSrc)return;
+  const im=cropSrc;
+  const r=cropRect?{x:cropRect.x/cropScale,y:cropRect.y/cropScale,
+                    w:cropRect.w/cropScale,h:cropRect.h/cropScale}
+                 :{x:0,y:0,w:im.width,h:im.height};
+  $('#cropGo').textContent='읽는 중…';
+  try{
+    /* 기준 만들 때는 해상도를 크게 올려 판독 정확도를 확보 */
+    const W=Math.max(1600,Math.min(2400,Math.round(r.w*2)));
+    const H=Math.round(r.h*(W/r.w));
+    cv.width=W;cv.height=H;
+    cx.imageSmoothingQuality='high';
+    cx.drawImage(im,r.x,r.y,r.w,r.h,0,0,W,H);
+    const L=await readLines(binarize(cx.getImageData(0,0,W,H)));
+    $('#tx').value=L.map(l=>l.text).join('\n');
+    $('#crop').classList.remove('on');cropSrc=null;
+    alert('읽어왔습니다.\n\n판독기는 글자를 자주 틀립니다. 작업의뢰서와 한 글자씩 대조해 고친 뒤 저장하세요.\n기준이 틀리면 검사 전체가 틀립니다.');
+  }catch(err){alert('읽기에 실패했습니다.');}
+  finally{$('#cropGo').textContent='이 영역 읽기';}});
+
 $('#btnAuto').addEventListener('click',()=>{
   if(!ready){alert('판독 엔진이 아직 준비 중입니다.');return;}
   if(!confirm('작업의뢰서 종이가 아니라 상자에 붙은 실제 라벨을 찍어야 합니다.\n의뢰서는 한글이 섞여 있어 판독되지 않습니다.\n\n계속할까요?'))return;
   const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.capture='environment';
-  inp.onchange=async e=>{
-    const f=e.target.files[0];if(!f)return;
-    $('#btnAuto').textContent='읽는 중…';
-    try{
-      const L=await readLines(await toCanvas(f));
-      $('#tx').value=L.map(l=>l.text).join('\n');
-      alert('읽어왔습니다.\n작업의뢰서와 한 글자씩 대조해 고친 뒤 저장하세요.');
-    }catch(err){alert('읽기에 실패했습니다.');}
-    finally{$('#btnAuto').textContent='실제 라벨에서 읽기';}};
+  inp.onchange=e=>{const f=e.target.files[0];if(f)openCrop(f);};
   inp.click();});
 
 /* ================= QR ================= */
